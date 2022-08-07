@@ -280,7 +280,7 @@ test "Rational mult" {
     try std.testing.expectEqual(Rational.new(4, 9), Rational.new(2, 3).mult(Rational.new(2, 3)));
 }
 
-fn inside_map(comptime T: type, pos: Pos, map: [][]T) bool {
+fn inside_map(pos: Pos, map: [][]Pos) bool {
     const is_inside = @as(usize, pos.y) < map.len and @as(usize, pos.x) < map[0].len;
     return is_inside;
 }
@@ -311,6 +311,18 @@ fn matching_visible(expected: [][]usize, visible: []Pos) void {
     }
 }
 
+fn is_blocking(pos: Pos, tiles: [][]Pos) bool {
+    return !inside_map(pos, tiles) or tiles[pos.1 as usize][pos.0 as usize] == 1;
+}
+
+// TODO this needs a struct containing the tiles map and an arraylist of visible tiles.
+// this will then be the second argument to mark_visible to make this data available.
+fn mark_visible(pos: Pos, visible: [][]bool) void {
+    if (inside_map(pos, tiles) && !visible.contains(&pos)) {
+        visible.push(pos);
+    }
+}
+
 test "expansive walls" {
     const origin = Pos.new(1, 2);
 
@@ -318,10 +330,6 @@ test "expansive walls" {
                      [_]isize{1, 0, 0, 0, 0, 0, 1},
                      [_]isize{1, 0, 0, 0, 0, 0, 1},
                      [_]isize{1, 1, 1, 1, 1, 1, 1}};
-
-    const mut is_blocking = |pos: Pos| {
-        return  !inside_map(pos, &tiles) || tiles[pos.1 as usize][pos.0 as usize] == 1;
-    };
 
     var visible = Vec::new();
     var mark_visible = |pos: Pos| {
