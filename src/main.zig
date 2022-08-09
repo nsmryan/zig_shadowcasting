@@ -1,5 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
+const ArrayList = std.ArrayList;
+const Allocator = std.mem.Allocator;
 
 /// This Pos type is expected to be generate enough to allow the user
 /// to cast into and out of their own type, such as from the euclid crate.
@@ -25,59 +27,62 @@ pub const Pos = struct {
 ///
 /// I tried to write a nicer API which would modify the map as a separate user
 /// data, but I can't work out the lifetime annotations.
-pub fn ComputeFov(comptime Map: type, comptime Result: type) type {
+pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime ErrorSet: type) type {
     return struct {
         const Self = @This();
 
         map: Map,
         result: Result,
 
-        pub const MarkVisible = fn (pos: Pos, map: Map) void;
+        pub const IsBlocking = fn (pos: Pos, map: Map) bool;
 
-        pub const IsBlocking = fn (pos: Pos, result: Result) void;
+        pub const MarkVisible = fn (pos: Pos, result: Result) ErrorSet!void;
 
         pub fn new(map: Map, result: Result) Self {
             return Self{ .map = map, .result = result };
         }
 
-        pub fn compute_fov(self: *Self, origin: Pos, is_blocking: IsBlocking, mark_visible: MarkVisible) void {
-            mark_visible(origin, self.map);
+        pub fn compute_fov(self: *Self, origin: Pos, is_blocking: IsBlocking, mark_visible: MarkVisible) ErrorSet!void {
+            try mark_visible(origin, self.result);
 
-            var index = 0;
+            var index: usize = 0;
             while (index < 4) : (index += 1) {
                 const quadrant = Quadrant.new(Cardinal.from_index(index), origin);
 
                 //const first_row = Row.new(1, Rational::new(-1, 1), Rational::new(1, 1));
                 const first_row = Row.new(1, Rational.new(-1, 1), Rational.new(1, 1));
 
-                scan(first_row, quadrant, is_blocking, mark_visible);
+                try self.scan(first_row, quadrant, is_blocking, mark_visible);
             }
         }
 
-        fn scan(self: *Self, input_row: Row, quadrant: Quadrant, is_blocking: IsBlocking, mark_visible: MarkVisible) void {
-            var prev_tile = null;
+        fn scan(self: *Self, input_row: Row, quadrant: Quadrant, is_blocking: IsBlocking, mark_visible: MarkVisible) ErrorSet!void {
+            var prev_tile: ?Pos = null;
 
             var row = input_row;
 
-            var iter = row.tiles();
-            for (iter.next()) |tile| {
-                const tile_is_wall = is_blocking(quadrant.transform(tile));
+            var iter: RowIter = row.tiles();
+            //for (iter.next()) |tile| {
+            var maybe_tile = iter.next();
+            while (maybe_tile != null) {
+                var tile = maybe_tile.?;
+                const tile_is_wall = is_blocking(quadrant.transform(tile), self.map);
                 const tile_is_floor = !tile_is_wall;
 
                 var prev_is_wall = false;
                 if (prev_tile) |prev| {
-                    prev_is_wall = is_blocking(quadrant.transform(prev));
+                    prev_is_wall = is_blocking(quadrant.transform(prev), self.map);
                 }
 
                 var prev_is_floor = false;
                 if (prev_tile) |prev| {
-                    prev_is_floor = !is_blocking(quadrant.transform(prev));
+                    prev_is_floor = !is_blocking(quadrant.transform(prev), self.map);
                 }
 
                 if (tile_is_wall or is_symmetric(row, tile)) {
                     const pos = quadrant.transform(tile);
 
-                    mark_visible(pos);
+                    try mark_visible(pos, self.result);
                 }
 
                 if (prev_is_wall and tile_is_floor) {
@@ -85,19 +90,22 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type) type {
                 }
 
                 if (prev_is_floor and tile_is_wall) {
-                    const next_row = row.next();
+                    if (row.next()) |next_row| {
+                        var next_row_var = next_row;
+                        next_row_var.end_slope = slope(tile);
 
-                    next_row.end_slope = slope(tile);
-
-                    scan(next_row, quadrant, is_blocking, mark_visible);
+                        try self.scan(next_row_var, quadrant, is_blocking, mark_visible);
+                    }
                 }
 
                 prev_tile = tile;
             }
 
             if (prev_tile) |tile| {
-                if (!is_blocking(quadrant.transform(tile))) {
-                    self.scan(row.next(), quadrant, is_blocking, mark_visible);
+                if (!is_blocking(quadrant.transform(tile), self.map)) {
+                    if (row.next()) |next_row| {
+                        try self.scan(next_row, quadrant, is_blocking, mark_visible);
+                    }
                 }
             }
         }
@@ -125,7 +133,7 @@ const Quadrant = struct {
         return Quadrant{ .cardinal = cardinal, .ox = origin.x, .oy = origin.y };
     }
 
-    fn transform(self: *Quadrant, tile: Pos) Pos {
+    fn transform(self: *const Quadrant, tile: Pos) Pos {
         const row = tile.x;
         const col = tile.y;
 
@@ -155,7 +163,7 @@ const Row = struct {
     end_slope: Rational,
 
     fn new(depth: isize, start_slope: Rational, end_slope: Rational) Row {
-        return Row{ depth, start_slope, end_slope };
+        return .{ .depth = depth, .start_slope = start_slope, .end_slope = end_slope };
     }
 
     //    // NOTE the Rust version uses an interator. For Zig, I will likely define a separate
@@ -174,7 +182,7 @@ const Row = struct {
         return RowIter.new(min_col, max_col, depth);
     }
 
-    fn next(self: *Row) Row {
+    fn next(self: *Row) ?Row {
         return Row.new(self.depth + 1, self.start_slope, self.end_slope);
     }
 };
@@ -220,11 +228,11 @@ fn is_symmetric(row: Row, tile: Pos) bool {
 }
 
 fn round_ties_up(n: Rational) isize {
-    return (n + Rational.new(1, 2)).floor();
+    return (n.add(Rational.new(1, 2))).floor();
 }
 
 fn round_ties_down(n: Rational) isize {
-    return (n - Rational.new(1, 2)).ceil();
+    return (n.sub(Rational.new(1, 2))).ceil();
 }
 
 const Rational = struct {
@@ -241,6 +249,10 @@ const Rational = struct {
 
     pub fn add(self: Rational, other: Rational) Rational {
         return Rational.new(self.num * other.denom + other.num * self.denom, self.denom * other.denom);
+    }
+
+    pub fn sub(self: Rational, other: Rational) Rational {
+        return Rational.new(self.num * other.denom - other.num * self.denom, self.denom * other.denom);
     }
 
     pub fn ceil(self: Rational) isize {
@@ -280,72 +292,85 @@ test "Rational mult" {
     try std.testing.expectEqual(Rational.new(4, 9), Rational.new(2, 3).mult(Rational.new(2, 3)));
 }
 
-fn inside_map(pos: Pos, map: [][]Pos) bool {
-    const is_inside = @as(usize, pos.y) < map.len and @as(usize, pos.x) < map[0].len;
+fn inside_map(pos: Pos, map: []const []const isize) bool {
+    const is_inside = @bitCast(usize, pos.y) < map.len and @bitCast(usize, pos.x) < map[0].len;
     return is_inside;
 }
 
-fn contains(slice: []Pos, pos: Pos) bool {
-    var index = 0;
-    while (index < slice.len) {
-        if (std.meta.eql(slice[index], pos)) {
+//fn contains(slice: []Pos, pos: Pos) bool {
+//    var index = 0;
+//    while (index < slice.len) {
+//        if (std.meta.eql(slice[index], pos)) {
+//            return true;
+//        }
+//    }
+//    return false;
+//}
+
+fn matching_visible(expected: []const []const isize, visible: ArrayList(Pos)) void {
+    var y: usize = 0;
+    while (y < expected.len) {
+        var x: usize = 0;
+        while (x < expected[0].len) {
+            if (contains(visible, Pos.new(@intCast(isize, x), @intCast(isize, y)))) {
+                std.debug.print("1\n", .{});
+            } else {
+                std.debug.print("0\n", .{});
+            }
+            std.debug.assert(expected[y][x] == 1 and contains(visible, Pos.new(@bitCast(isize, x), @bitCast(isize, y))));
+        }
+        std.debug.print("\n", .{});
+    }
+}
+
+fn is_blocking_fn(pos: Pos, tiles: []const []const isize) bool {
+    return !inside_map(pos, tiles) or tiles[@intCast(usize, pos.y)][@intCast(usize, pos.x)] == 1;
+}
+
+const State = struct {
+    visible: ArrayList(Pos),
+    tiles: []const []const isize,
+
+    pub fn new(visible: ArrayList(Pos), tiles: []const []const isize) State {
+        return State{ .visible = visible, .tiles = tiles };
+    }
+};
+
+fn contains(visible: ArrayList(Pos), pos: Pos) bool {
+    for (visible.items[0..]) |item| {
+        if (std.meta.eql(pos, item)) {
             return true;
         }
     }
     return false;
 }
 
-fn matching_visible(expected: [][]usize, visible: []Pos) void {
-    var y = 0;
-    while (y < expected.len) {
-        var x = 0;
-        while (x < expected[0].len) {
-            if (contains(visible, Pos.new(@as(isize, x), @as(isize, y)))) {
-                std.debug.print("1\n");
-            } else {
-                std.debug.print("0\n");
-            }
-            std.debug.assert(expected[y][x] == 1, contains(visible, Pos.new(@as(isize, x), @as(isize, y))));
-        }
-        std.debug.print("\n");
-    }
-}
-
-fn is_blocking(pos: Pos, tiles: [][]Pos) bool {
-    return !inside_map(pos, tiles) or tiles[pos.1 as usize][pos.0 as usize] == 1;
-}
-
-// TODO this needs a struct containing the tiles map and an arraylist of visible tiles.
-// this will then be the second argument to mark_visible to make this data available.
-fn mark_visible(pos: Pos, visible: [][]bool) void {
-    if (inside_map(pos, tiles) && !visible.contains(&pos)) {
-        visible.push(pos);
+fn mark_visible_fn(pos: Pos, state: *State) !void {
+    if (inside_map(pos, state.tiles) and !contains(state.visible, pos)) {
+        try state.visible.append(pos);
     }
 }
 
 test "expansive walls" {
     const origin = Pos.new(1, 2);
 
-    const tiles = [_][_]isize{[_]isize{1, 1, 1, 1, 1, 1, 1},
-                     [_]isize{1, 0, 0, 0, 0, 0, 1},
-                     [_]isize{1, 0, 0, 0, 0, 0, 1},
-                     [_]isize{1, 1, 1, 1, 1, 1, 1}};
-
-    var visible = Vec::new();
-    var mark_visible = |pos: Pos| {
-        if inside_map(pos, &tiles) && !visible.contains(&pos) {
-            visible.push(pos);
-        }
+    const tiles = [_][]const isize{
+        &.{ 1, 1, 1, 1, 1, 1, 1 },
     };
+    //const tiles = [_][]isize{ []isize{ 1, 1, 1, 1, 1, 1, 1 }, []isize{ 1, 0, 0, 0, 0, 0, 1 }, []isize{ 1, 0, 0, 0, 0, 0, 1 }, []isize{ 1, 1, 1, 1, 1, 1, 1 } };
 
-    compute_fov(origin, &mut is_blocking, &mut mark_visible);
+    var allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    var visible = ArrayList(Pos).init(allocator.allocator());
 
-    const expected = [_][_]isize{[_]isize{1, 1, 1, 1, 1, 1, 1},
-                        [_]isize{1, 1, 1, 1, 1, 1, 1},
-                        [_]isize{1, 1, 1, 1, 1, 1, 1},
-                        [_]isize{1, 1, 1, 1, 1, 1, 1}};
-    matching_visible(expected, visible);
+    var state = State.new(visible, tiles[0..]);
+    var compute_fov = ComputeFov([]const []const isize, *State, Allocator.Error).new(tiles[0..], &state);
+
+    try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
+
+    const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 } };
+    matching_visible(expected[0..], visible);
 }
+
 //
 //
 //#[test]
@@ -365,7 +390,7 @@ test "expansive walls" {
 //    let mut visible = Vec::new();
 //    let mut mark_visible = |pos: Pos| {
 //        if inside_map(pos, &tiles) && !visible.contains(&pos) {
-//            visible.push(pos);
+//            visible.append(pos);
 //        }
 //    };
 //
@@ -398,7 +423,7 @@ test "expansive walls" {
 //        let outside = (pos.1 as usize) >= tiles.len() || (pos.0 as usize) >= tiles[0].len();
 //
 //        if !outside && !visible.contains(&pos) {
-//            visible.push(pos);
+//            visible.append(pos);
 //        }
 //    };
 //
