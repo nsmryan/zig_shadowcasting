@@ -33,14 +33,14 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime InErrorSet
 
         pub const IsBlocking = fn (pos: Pos, map: Map) bool;
 
-        pub const MarkVisible = fn (pos: Pos, result: Result) ErrorSet!void;
+        pub const MarkVisible = fn (pos: Pos, map: Map, result: Result) ErrorSet!void;
 
         pub fn new(map: Map, result: Result) Self {
             return Self{ .map = map, .result = result };
         }
 
         pub fn compute_fov(self: *Self, origin: Pos, is_blocking: IsBlocking, mark_visible: MarkVisible) ErrorSet!void {
-            try mark_visible(origin, self.result);
+            try mark_visible(origin, self.map, self.result);
 
             var index: usize = 0;
             while (index < 4) : (index += 1) {
@@ -72,7 +72,7 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime InErrorSet
                 if (tile_is_wall or try is_symmetric(row, tile)) {
                     const pos = quadrant.transform(tile);
 
-                    try mark_visible(pos, self.result);
+                    try mark_visible(pos, self.map, self.result);
                 }
 
                 if (prev_is_wall and tile_is_floor) {
@@ -300,7 +300,7 @@ fn inside_map(pos: Pos, map: []const []const isize) bool {
     return is_inside;
 }
 
-fn matching_visible(expected: []const []const isize, visible: ArrayList(Pos)) !void {
+fn matching_visible(expected: []const []const isize, visible: *ArrayList(Pos)) !void {
     std.debug.print("\nactual\n", .{});
     var y: usize = 0;
     while (y < expected.len) : (y += 1) {
@@ -342,16 +342,7 @@ fn is_blocking_fn(pos: Pos, tiles: []const []const isize) bool {
     return !inside_map(pos, tiles) or tiles[@intCast(usize, pos.y)][@intCast(usize, pos.x)] == 1;
 }
 
-const State = struct {
-    visible: ArrayList(Pos),
-    tiles: []const []const isize,
-
-    pub fn new(visible: ArrayList(Pos), tiles: []const []const isize) State {
-        return State{ .visible = visible, .tiles = tiles };
-    }
-};
-
-fn contains(visible: ArrayList(Pos), pos: Pos) bool {
+fn contains(visible: *ArrayList(Pos), pos: Pos) bool {
     for (visible.items[0..]) |item| {
         if (std.meta.eql(pos, item)) {
             return true;
@@ -360,9 +351,9 @@ fn contains(visible: ArrayList(Pos), pos: Pos) bool {
     return false;
 }
 
-fn mark_visible_fn(pos: Pos, state: *State) !void {
-    if (inside_map(pos, state.tiles) and !contains(state.visible, pos)) {
-        try state.visible.append(pos);
+fn mark_visible_fn(pos: Pos, tiles: []const []const isize, visible: *ArrayList(Pos)) !void {
+    if (inside_map(pos, tiles) and !contains(visible, pos)) {
+        try visible.append(pos);
     }
 }
 
@@ -372,15 +363,15 @@ test "expansive walls" {
     const tiles = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 0, 0, 0, 0, 0, 1 }, &.{ 1, 0, 0, 0, 0, 0, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 } };
 
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    var state = State.new(ArrayList(Pos).init(allocator.allocator()), tiles[0..]);
+    var visible = ArrayList(Pos).init(allocator.allocator());
 
     const ErrorSet = error{ Overflow, OutOfMemory };
-    var compute_fov = ComputeFov([]const []const isize, *State, ErrorSet).new(tiles[0..], &state);
+    var compute_fov = ComputeFov([]const []const isize, *ArrayList(Pos), ErrorSet).new(tiles[0..], &visible);
 
     try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 } };
-    try matching_visible(expected[0..], state.visible);
+    try matching_visible(expected[0..], &visible);
 }
 
 test "test_expanding_shadows" {
@@ -389,15 +380,15 @@ test "test_expanding_shadows" {
     const tiles = [_][]const isize{ &.{ 0, 0, 0, 0, 0, 0, 0 }, &.{ 0, 1, 0, 0, 0, 0, 0 }, &.{ 0, 0, 0, 0, 0, 0, 0 }, &.{ 0, 0, 0, 0, 0, 0, 0 }, &.{ 0, 0, 0, 0, 0, 0, 0 } };
 
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    var state = State.new(ArrayList(Pos).init(allocator.allocator()), tiles[0..]);
+    var visible = ArrayList(Pos).init(allocator.allocator());
 
     const ErrorSet = error{ Overflow, OutOfMemory };
-    var compute_fov = ComputeFov([]const []const isize, *State, ErrorSet).new(tiles[0..], &state);
+    var compute_fov = ComputeFov([]const []const isize, *ArrayList(Pos), ErrorSet).new(tiles[0..], &visible);
 
     try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 0, 0, 1, 1, 1 }, &.{ 1, 1, 0, 0, 0, 0, 1 }, &.{ 1, 1, 1, 0, 0, 0, 0 } };
-    try matching_visible(expected[0..], state.visible);
+    try matching_visible(expected[0..], &visible);
 }
 
 test "test_no_blind_corners" {
@@ -406,14 +397,14 @@ test "test_no_blind_corners" {
     const tiles = [_][]const isize{ &.{ 0, 0, 0, 0, 0, 0, 0 }, &.{ 1, 1, 1, 1, 0, 0, 0 }, &.{ 0, 0, 0, 1, 0, 0, 0 }, &.{ 0, 0, 0, 1, 0, 0, 0 } };
 
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    var state = State.new(ArrayList(Pos).init(allocator.allocator()), tiles[0..]);
+    var visible = ArrayList(Pos).init(allocator.allocator());
 
     const ErrorSet = error{ Overflow, OutOfMemory };
-    var compute_fov = ComputeFov([]const []const isize, *State, ErrorSet).new(tiles[0..], &state);
+    var compute_fov = ComputeFov([]const []const isize, *ArrayList(Pos), ErrorSet).new(tiles[0..], &visible);
 
     try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 0, 0, 0, 0, 1, 1, 1 }, &.{ 0, 0, 0, 0, 0, 1, 1 } };
 
-    try matching_visible(expected[0..], state.visible);
+    try matching_visible(expected[0..], &visible);
 }
