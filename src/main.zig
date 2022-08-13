@@ -250,8 +250,13 @@ const Rational = struct {
         var ratio_comp = first.order(second) catch unreachable;
 
         if ((result and (ratio_comp == std.math.Order.lt)) or (!result and ratio_comp != std.math.Order.lt)) {
-            std.debug.print("GTEQ gave different results\n", .{});
-            std.debug.print("{}/{} - {}/{} = {}\n", .{ self.num, self.denom, other.num, other.denom, result });
+            std.debug.print("gteq gave different results\n", .{});
+            std.debug.print("{}/{} >= {}/{} = {}\n", .{ self.num, self.denom, other.num, other.denom, result });
+            std.debug.print("{} >= {} = {}\n", .{
+                first.toFloat(f64) catch unreachable,
+                second.toFloat(f64) catch unreachable,
+                ratio_comp,
+            });
             unreachable;
         }
 
@@ -273,7 +278,7 @@ const Rational = struct {
 
         if ((result and (ratio_comp == std.math.Order.gt)) or (!result and ratio_comp != std.math.Order.gt)) {
             std.debug.print("lteq gave different results\n", .{});
-            std.debug.print("{}/{} - {}/{} = {}\n", .{ self.num, self.denom, other.num, other.denom, result });
+            std.debug.print("{}/{} <= {}/{} = {}\n", .{ self.num, self.denom, other.num, other.denom, result });
             unreachable;
         }
 
