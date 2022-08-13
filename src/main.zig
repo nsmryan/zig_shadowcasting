@@ -42,7 +42,6 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime InErrorSet
         pub fn compute_fov(self: *Self, origin: Pos, is_blocking: IsBlocking, mark_visible: MarkVisible) ErrorSet!void {
             try mark_visible(origin, self.result);
 
-            //std.debug.print("\n", .{});
             var index: usize = 0;
             while (index < 4) : (index += 1) {
                 const quadrant = Quadrant.new(Cardinal.from_index(index), origin);
@@ -59,9 +58,7 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime InErrorSet
             var row = input_row;
 
             var iter: RowIter = row.tiles();
-            //std.debug.print("s {}\n", .{input_row.depth});
             while (iter.next()) |tile| {
-                //std.debug.print("r {} {}\n", .{ tile.x, tile.y });
                 const tile_is_wall = is_blocking(quadrant.transform(tile), self.map);
                 const tile_is_floor = !tile_is_wall;
 
@@ -74,8 +71,6 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime InErrorSet
 
                 if (tile_is_wall or try is_symmetric(row, tile)) {
                     const pos = quadrant.transform(tile);
-
-                    //std.debug.print("v {} {}\n", .{ pos.x, pos.y });
 
                     try mark_visible(pos, self.result);
                 }
@@ -167,7 +162,6 @@ const Row = struct {
 
         const depth = self.depth;
 
-        //std.debug.print("row iter {} {} {}", .{ min_col, max_col, depth });
         return RowIter.new(min_col, max_col, depth);
     }
 
@@ -228,170 +222,40 @@ const Rational = struct {
     const Error = error{Overflow};
     num: isize,
     denom: isize,
-    ratio: std.math.big.Rational,
 
     pub fn new(num: isize, denom: isize) Rational {
-        var allocator = std.heap.GeneralPurposeAllocator(.{}){};
-        var ratio = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        return Rational{ .num = num, .denom = denom, .ratio = ratio };
+        return Rational{ .num = num, .denom = denom };
     }
 
     pub fn gteq(self: Rational, other: Rational) Rational.Error!bool {
-        var allocator = std.heap.GeneralPurposeAllocator(.{}){};
-
-        var first = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        first.setRatio(self.num, self.denom) catch unreachable;
-
-        var second = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        second.setRatio(other.num, other.denom) catch unreachable;
-
-        var result = ((self.num * other.denom)) >= ((other.num * self.denom));
-
-        var ratio_comp = first.orderAbs(second) catch unreachable;
-
-        if ((result and (ratio_comp == std.math.Order.lt)) or (!result and ratio_comp != std.math.Order.lt)) {
-            std.debug.print("gteq gave different results\n", .{});
-            std.debug.print("{}/{} >= {}/{} = {}\n", .{ self.num, self.denom, other.num, other.denom, result });
-            std.debug.print("{} >= {} = {}\n", .{
-                first.toFloat(f64) catch unreachable,
-                second.toFloat(f64) catch unreachable,
-                ratio_comp,
-            });
-            unreachable;
-        }
-
+        const result = ((self.num * other.denom)) >= ((other.num * self.denom));
         return result;
     }
 
     pub fn lteq(self: Rational, other: Rational) Rational.Error!bool {
-        var allocator = std.heap.GeneralPurposeAllocator(.{}){};
-
-        var first = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        first.setRatio(self.num, self.denom) catch unreachable;
-
-        var second = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        second.setRatio(other.num, other.denom) catch unreachable;
-
-        var result = ((self.num * other.denom)) <= ((other.num * self.denom));
-
-        var ratio_comp = first.orderAbs(second) catch unreachable;
-
-        if ((result and (ratio_comp == std.math.Order.gt)) or (!result and ratio_comp != std.math.Order.gt)) {
-            std.debug.print("lteq gave different results\n", .{});
-            std.debug.print("{}/{} <= {}/{} = {}\n", .{ self.num, self.denom, other.num, other.denom, result });
-            unreachable;
-        }
-
+        const result = ((self.num * other.denom)) <= ((other.num * self.denom));
         return result;
     }
 
     pub fn mult(self: Rational, other: Rational) Rational {
-        var allocator = std.heap.GeneralPurposeAllocator(.{}){};
-
-        var first = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        first.setRatio(self.num, self.denom) catch unreachable;
-
-        var second = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        second.setRatio(other.num, other.denom) catch unreachable;
-
-        var result = Rational.new(self.num * other.num, self.denom * other.denom);
-
-        var ratio_result = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        ratio_result.mul(first, second) catch unreachable;
-
-        var result_as_ratio = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        result_as_ratio.setRatio(result.num, result.denom) catch unreachable;
-
-        if (ratio_result.order(result_as_ratio) catch unreachable != std.math.Order.eq) {
-            std.debug.print("mult gave different results\n", .{});
-            std.debug.print("{}/{} * {}/{} = {}/{}\n", .{ self.num, self.denom, other.num, other.denom, result.num, result.denom });
-            std.debug.print("{} * {} = {}\n", .{
-                first.toFloat(f64) catch unreachable,
-                second.toFloat(f64) catch unreachable,
-                result_as_ratio.toFloat(f64) catch unreachable,
-            });
-            unreachable;
-        }
-
+        const result = Rational.new(self.num * other.num, self.denom * other.denom);
         return result;
     }
 
     pub fn add(self: Rational, other: Rational) Rational {
-        var allocator = std.heap.GeneralPurposeAllocator(.{}){};
-
-        var first = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        first.setRatio(self.num, self.denom) catch unreachable;
-
-        var second = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        second.setRatio(other.num, other.denom) catch unreachable;
-
-        var result = Rational.new(self.num * other.denom + other.num * self.denom, self.denom * other.denom);
-
-        var ratio_result = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        ratio_result.add(first, second) catch unreachable;
-
-        var result_as_ratio = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        result_as_ratio.setRatio(result.num, result.denom) catch unreachable;
-
-        if (ratio_result.order(result_as_ratio) catch unreachable != std.math.Order.eq) {
-            std.debug.print("add gave different results\n", .{});
-            std.debug.print("{}/{} + {}/{} = {}/{}\n", .{ self.num, self.denom, other.num, other.denom, result.num, result.denom });
-            std.debug.print("{} + {} = {}\n", .{
-                first.toFloat(f64) catch unreachable,
-                second.toFloat(f64) catch unreachable,
-                result_as_ratio.toFloat(f64) catch unreachable,
-            });
-            unreachable;
-        }
-
+        const result = Rational.new(self.num * other.denom + other.num * self.denom, self.denom * other.denom);
         return result;
     }
 
     pub fn sub(self: Rational, other: Rational) Rational {
-        var allocator = std.heap.GeneralPurposeAllocator(.{}){};
-
-        var first = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        first.setRatio(self.num, self.denom) catch unreachable;
-
-        var second = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        second.setRatio(other.num, other.denom) catch unreachable;
-
-        var result = Rational.new(self.num * other.denom - other.num * self.denom, self.denom * other.denom);
-
-        var ratio_result = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        ratio_result.sub(first, second) catch unreachable;
-
-        var result_as_ratio = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-        result_as_ratio.setRatio(result.num, result.denom) catch unreachable;
-
-        if (ratio_result.order(result_as_ratio) catch unreachable != std.math.Order.eq) {
-            std.debug.print("sub gave different results\n", .{});
-            std.debug.print("{}/{} - {}/{} = {}/{}\n", .{ self.num, self.denom, other.num, other.denom, result.num, result.denom });
-            std.debug.print("{} - {} = {}\n", .{
-                first.toFloat(f64) catch unreachable,
-                second.toFloat(f64) catch unreachable,
-                result_as_ratio.toFloat(f64) catch unreachable,
-            });
-            unreachable;
-        }
-
+        const result = Rational.new(self.num * other.denom - other.num * self.denom, self.denom * other.denom);
         return result;
     }
 
     pub fn ceil(self: Rational) isize {
         if (self.denom != 0) {
             const div = @divFloor(self.num, self.denom);
-            var result = div + @boolToInt(@mod(self.num, self.denom) > 0);
-
-            var allocator = std.heap.GeneralPurposeAllocator(.{}){};
-            var ratio = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-            ratio.setRatio(self.num, self.denom) catch unreachable;
-            var ratio_result = @ceil(ratio.toFloat(f64) catch unreachable);
-            if (@floatToInt(isize, ratio_result) != result) {
-                std.debug.print("ratio ceil {}, Rational was {}\n", .{ ratio_result, result });
-                unreachable;
-            }
-
+            const result = div + @boolToInt(@mod(self.num, self.denom) > 0);
             return result;
         } else {
             // Idk whether this can happen for this algorithm.
@@ -401,17 +265,7 @@ const Rational = struct {
 
     pub fn floor(self: Rational) isize {
         if (self.denom != 0) {
-            var result = @divFloor(self.num, self.denom);
-
-            var allocator = std.heap.GeneralPurposeAllocator(.{}){};
-            var ratio = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
-            ratio.setRatio(self.num, self.denom) catch unreachable;
-            var ratio_result = @floor(ratio.toFloat(f64) catch unreachable);
-            if (@floatToInt(isize, ratio_result) != result) {
-                std.debug.print("ratio floor {}, Rational was {}\n", .{ ratio_result, result });
-                unreachable;
-            }
-
+            const result = @divFloor(self.num, self.denom);
             return result;
         } else {
             // Idk whether this can happen for this algorithm.
@@ -457,7 +311,6 @@ fn matching_visible(expected: []const []const isize, visible: ArrayList(Pos)) !v
             } else {
                 std.debug.print("0 ", .{});
             }
-            //std.debug.assert(expected[y][x] == 1 and contains(visible, Pos.new(@bitCast(isize, x), @bitCast(isize, y))));
         }
         std.debug.print("\n", .{});
     }
@@ -472,7 +325,6 @@ fn matching_visible(expected: []const []const isize, visible: ArrayList(Pos)) !v
             } else {
                 std.debug.print("0 ", .{});
             }
-            //std.debug.assert(expected[y][x] == 1 and contains(visible, Pos.new(@bitCast(isize, x), @bitCast(isize, y))));
         }
         std.debug.print("\n", .{});
     }
@@ -481,7 +333,6 @@ fn matching_visible(expected: []const []const isize, visible: ArrayList(Pos)) !v
     while (y < expected.len) : (y += 1) {
         var x: usize = 0;
         while (x < expected[0].len) : (x += 1) {
-            std.debug.print("{} {} = {}, {}\n", .{ x, y, expected[y][x], contains(visible, Pos.new(@bitCast(isize, x), @bitCast(isize, y))) });
             try std.testing.expectEqual(expected[y][x] == 1, contains(visible, Pos.new(@bitCast(isize, x), @bitCast(isize, y))));
         }
     }
@@ -527,7 +378,6 @@ test "expansive walls" {
     var compute_fov = ComputeFov([]const []const isize, *State, ErrorSet).new(tiles[0..], &state);
 
     try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
-    std.debug.print("\nnum visible {}, \n", .{state.visible.items.len});
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 } };
     try matching_visible(expected[0..], state.visible);
@@ -545,7 +395,6 @@ test "test_expanding_shadows" {
     var compute_fov = ComputeFov([]const []const isize, *State, ErrorSet).new(tiles[0..], &state);
 
     try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
-    std.debug.print("\nnum visible {}, \n", .{state.visible.items.len});
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 0, 0, 1, 1, 1 }, &.{ 1, 1, 0, 0, 0, 0, 1 }, &.{ 1, 1, 1, 0, 0, 0, 0 } };
     try matching_visible(expected[0..], state.visible);
@@ -563,7 +412,6 @@ test "test_no_blind_corners" {
     var compute_fov = ComputeFov([]const []const isize, *State, ErrorSet).new(tiles[0..], &state);
 
     try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
-    std.debug.print("\nnum visible {}, \n", .{state.visible.items.len});
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 0, 0, 0, 0, 1, 1, 1 }, &.{ 0, 0, 0, 0, 0, 1, 1 } };
 
