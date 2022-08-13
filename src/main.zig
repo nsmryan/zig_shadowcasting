@@ -27,9 +27,10 @@ pub const Pos = struct {
 ///
 /// I tried to write a nicer API which would modify the map as a separate user
 /// data, but I can't work out the lifetime annotations.
-pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime ErrorSet: type) type {
+pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime InErrorSet: type) type {
     return struct {
         const Self = @This();
+        const ErrorSet = InErrorSet || error{Overflow};
 
         map: Map,
         result: Result,
@@ -49,7 +50,6 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime ErrorSet: 
             while (index < 4) : (index += 1) {
                 const quadrant = Quadrant.new(Cardinal.from_index(index), origin);
 
-                //const first_row = Row.new(1, Rational::new(-1, 1), Rational::new(1, 1));
                 const first_row = Row.new(1, Rational.new(-1, 1), Rational.new(1, 1));
 
                 try self.scan(first_row, quadrant, is_blocking, mark_visible);
@@ -62,10 +62,7 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime ErrorSet: 
             var row = input_row;
 
             var iter: RowIter = row.tiles();
-            //for (iter.next()) |tile| {
-            var maybe_tile = iter.next();
-            while (maybe_tile != null) {
-                var tile = maybe_tile.?;
+            while (iter.next()) |tile| {
                 const tile_is_wall = is_blocking(quadrant.transform(tile), self.map);
                 const tile_is_floor = !tile_is_wall;
 
@@ -79,7 +76,7 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime ErrorSet: 
                     prev_is_floor = !is_blocking(quadrant.transform(prev), self.map);
                 }
 
-                if (tile_is_wall or is_symmetric(row, tile)) {
+                if (tile_is_wall or try is_symmetric(row, tile)) {
                     const pos = quadrant.transform(tile);
 
                     try mark_visible(pos, self.result);
@@ -214,7 +211,7 @@ fn slope(tile: Pos) Rational {
     return Rational.new(2 * col - 1, 2 * row_depth);
 }
 
-fn is_symmetric(row: Row, tile: Pos) bool {
+fn is_symmetric(row: Row, tile: Pos) error{Overflow}!bool {
     const col = tile.y;
 
     const depth_times_start = Rational.new(row.depth, 1).mult(row.start_slope);
@@ -222,7 +219,7 @@ fn is_symmetric(row: Row, tile: Pos) bool {
 
     const col_rat = Rational.new(col, 1);
 
-    const symmetric = col_rat >= depth_times_start and col_rat <= depth_times_end;
+    const symmetric = (try col_rat.gteq(depth_times_start)) and (try col_rat.lteq(depth_times_end));
 
     return symmetric;
 }
@@ -236,11 +233,20 @@ fn round_ties_down(n: Rational) isize {
 }
 
 const Rational = struct {
+    const Error = error{Overflow};
     num: isize,
     denom: isize,
 
     pub fn new(num: isize, denom: isize) Rational {
         return Rational{ .num = num, .denom = denom };
+    }
+
+    pub fn gteq(self: Rational, other: Rational) Rational.Error!bool {
+        return (try std.math.absInt(self.num * self.denom)) >= (try std.math.absInt(other.num * other.denom));
+    }
+
+    pub fn lteq(self: Rational, other: Rational) Rational.Error!bool {
+        return (try std.math.absInt(self.num * self.denom)) <= (try std.math.absInt(other.num * other.denom));
     }
 
     pub fn mult(self: Rational, other: Rational) Rational {
@@ -354,16 +360,16 @@ fn mark_visible_fn(pos: Pos, state: *State) !void {
 test "expansive walls" {
     const origin = Pos.new(1, 2);
 
-    const tiles = [_][]const isize{
-        &.{ 1, 1, 1, 1, 1, 1, 1 },
-    };
-    //const tiles = [_][]isize{ []isize{ 1, 1, 1, 1, 1, 1, 1 }, []isize{ 1, 0, 0, 0, 0, 0, 1 }, []isize{ 1, 0, 0, 0, 0, 0, 1 }, []isize{ 1, 1, 1, 1, 1, 1, 1 } };
+    //const tiles = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, };
+    const tiles = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 0, 0, 0, 0, 0, 1 }, &.{ 1, 0, 0, 0, 0, 0, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 } };
 
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     var visible = ArrayList(Pos).init(allocator.allocator());
 
     var state = State.new(visible, tiles[0..]);
-    var compute_fov = ComputeFov([]const []const isize, *State, Allocator.Error).new(tiles[0..], &state);
+
+    const ErrorSet = error{ Overflow, OutOfMemory };
+    var compute_fov = ComputeFov([]const []const isize, *State, ErrorSet).new(tiles[0..], &state);
 
     try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
 
