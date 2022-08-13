@@ -67,13 +67,10 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime InErrorSet
                 const tile_is_floor = !tile_is_wall;
 
                 var prev_is_wall = false;
-                if (prev_tile) |prev| {
-                    prev_is_wall = is_blocking(quadrant.transform(prev), self.map);
-                }
-
                 var prev_is_floor = false;
                 if (prev_tile) |prev| {
-                    prev_is_floor = !is_blocking(quadrant.transform(prev), self.map);
+                    prev_is_wall = is_blocking(quadrant.transform(prev), self.map);
+                    prev_is_floor = !prev_is_wall;
                 }
 
                 if (tile_is_wall or try is_symmetric(row, tile)) {
@@ -87,12 +84,10 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime InErrorSet
                 }
 
                 if (prev_is_floor and tile_is_wall) {
-                    if (row.next()) |next_row| {
-                        var next_row_var = next_row;
-                        next_row_var.end_slope = slope(tile);
+                    var next_row = row.next();
+                    next_row.end_slope = slope(tile);
 
-                        try self.scan(next_row_var, quadrant, is_blocking, mark_visible);
-                    }
+                    try self.scan(next_row, quadrant, is_blocking, mark_visible);
                 }
 
                 prev_tile = tile;
@@ -100,9 +95,7 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime InErrorSet
 
             if (prev_tile) |tile| {
                 if (!is_blocking(quadrant.transform(tile), self.map)) {
-                    if (row.next()) |next_row| {
-                        try self.scan(next_row, quadrant, is_blocking, mark_visible);
-                    }
+                    try self.scan(row.next(), quadrant, is_blocking, mark_visible);
                 }
             }
         }
@@ -175,11 +168,10 @@ const Row = struct {
 
         const depth = self.depth;
 
-        //return (min_col..=max_col).map(move |col| (depth, col));
         return RowIter.new(min_col, max_col, depth);
     }
 
-    fn next(self: *Row) ?Row {
+    fn next(self: *Row) Row {
         return Row.new(self.depth + 1, self.start_slope, self.end_slope);
     }
 };
@@ -353,6 +345,7 @@ fn contains(visible: ArrayList(Pos), pos: Pos) bool {
 
 fn mark_visible_fn(pos: Pos, state: *State) !void {
     if (inside_map(pos, state.tiles) and !contains(state.visible, pos)) {
+        std.debug.print("{} {} visible\n", .{ pos.x, pos.y });
         try state.visible.append(pos);
     }
 }
@@ -360,27 +353,24 @@ fn mark_visible_fn(pos: Pos, state: *State) !void {
 test "expansive walls" {
     const origin = Pos.new(1, 2);
 
-    //const tiles = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, };
     const tiles = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 0, 0, 0, 0, 0, 1 }, &.{ 1, 0, 0, 0, 0, 0, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 } };
 
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    var visible = ArrayList(Pos).init(allocator.allocator());
-
-    var state = State.new(visible, tiles[0..]);
+    var state = State.new(ArrayList(Pos).init(allocator.allocator()), tiles[0..]);
 
     const ErrorSet = error{ Overflow, OutOfMemory };
     var compute_fov = ComputeFov([]const []const isize, *State, ErrorSet).new(tiles[0..], &state);
 
     try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
-    std.debug.print("num visible {}, ", .{visible.items.len});
+    std.debug.print("num visible {}, ", .{state.visible.items.len});
     var posIndex: usize = 0;
-    while (posIndex < visible.items.len) {
-        std.debug.print("{} {}, ", .{ visible.items[posIndex].x, visible.items[posIndex].y });
+    while (posIndex < state.visible.items.len) : (posIndex += 1) {
+        std.debug.print("{} {}, ", .{ state.visible.items[posIndex].x, state.visible.items[posIndex].y });
     }
     std.debug.print("\n", .{});
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 } };
-    matching_visible(expected[0..], visible);
+    matching_visible(expected[0..], state.visible);
 }
 
 //
