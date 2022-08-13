@@ -372,6 +372,12 @@ test "expansive walls" {
     var compute_fov = ComputeFov([]const []const isize, *State, ErrorSet).new(tiles[0..], &state);
 
     try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
+    std.debug.print("num visible {}, ", .{visible.items.len});
+    var posIndex: usize = 0;
+    while (posIndex < visible.items.len) {
+        std.debug.print("{} {}, ", .{ visible.items[posIndex].x, visible.items[posIndex].y });
+    }
+    std.debug.print("\n", .{});
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 } };
     matching_visible(expected[0..], visible);
