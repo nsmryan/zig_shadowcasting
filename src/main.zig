@@ -42,7 +42,7 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime InErrorSet
         pub fn compute_fov(self: *Self, origin: Pos, is_blocking: IsBlocking, mark_visible: MarkVisible) ErrorSet!void {
             try mark_visible(origin, self.result);
 
-            std.debug.print("\n", .{});
+            //std.debug.print("\n", .{});
             var index: usize = 0;
             while (index < 4) : (index += 1) {
                 const quadrant = Quadrant.new(Cardinal.from_index(index), origin);
@@ -59,9 +59,9 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime InErrorSet
             var row = input_row;
 
             var iter: RowIter = row.tiles();
-            std.debug.print("s {}\n", .{input_row.depth});
+            //std.debug.print("s {}\n", .{input_row.depth});
             while (iter.next()) |tile| {
-                std.debug.print("r {} {}\n", .{ tile.x, tile.y });
+                //std.debug.print("r {} {}\n", .{ tile.x, tile.y });
                 const tile_is_wall = is_blocking(quadrant.transform(tile), self.map);
                 const tile_is_floor = !tile_is_wall;
 
@@ -75,7 +75,7 @@ pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime InErrorSet
                 if (tile_is_wall or try is_symmetric(row, tile)) {
                     const pos = quadrant.transform(tile);
 
-                    std.debug.print("v {} {}\n", .{ pos.x, pos.y });
+                    //std.debug.print("v {} {}\n", .{ pos.x, pos.y });
 
                     try mark_visible(pos, self.result);
                 }
@@ -167,7 +167,7 @@ const Row = struct {
 
         const depth = self.depth;
 
-        std.debug.print("row iter {} {} {}", .{ min_col, max_col, depth });
+        //std.debug.print("row iter {} {} {}", .{ min_col, max_col, depth });
         return RowIter.new(min_col, max_col, depth);
     }
 
@@ -245,9 +245,9 @@ const Rational = struct {
         var second = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
         second.setRatio(other.num, other.denom) catch unreachable;
 
-        var result = (try std.math.absInt(self.num * self.denom)) >= (try std.math.absInt(other.num * other.denom));
+        var result = ((self.num * other.denom)) >= ((other.num * self.denom));
 
-        var ratio_comp = first.order(second) catch unreachable;
+        var ratio_comp = first.orderAbs(second) catch unreachable;
 
         if ((result and (ratio_comp == std.math.Order.lt)) or (!result and ratio_comp != std.math.Order.lt)) {
             std.debug.print("gteq gave different results\n", .{});
@@ -272,9 +272,9 @@ const Rational = struct {
         var second = std.math.big.Rational.init(allocator.allocator()) catch unreachable;
         second.setRatio(other.num, other.denom) catch unreachable;
 
-        var result = (try std.math.absInt(self.num * self.denom)) <= (try std.math.absInt(other.num * other.denom));
+        var result = ((self.num * other.denom)) <= ((other.num * self.denom));
 
-        var ratio_comp = first.order(second) catch unreachable;
+        var ratio_comp = first.orderAbs(second) catch unreachable;
 
         if ((result and (ratio_comp == std.math.Order.gt)) or (!result and ratio_comp != std.math.Order.gt)) {
             std.debug.print("lteq gave different results\n", .{});
@@ -446,22 +446,44 @@ fn inside_map(pos: Pos, map: []const []const isize) bool {
     return is_inside;
 }
 
-fn matching_visible(expected: []const []const isize, visible: ArrayList(Pos)) void {
+fn matching_visible(expected: []const []const isize, visible: ArrayList(Pos)) !void {
+    std.debug.print("\nactual\n", .{});
     var y: usize = 0;
     while (y < expected.len) : (y += 1) {
         var x: usize = 0;
         while (x < expected[0].len) : (x += 1) {
             if (contains(visible, Pos.new(@intCast(isize, x), @intCast(isize, y)))) {
-                std.debug.print("1\n", .{});
+                std.debug.print("1 ", .{});
             } else {
-                std.debug.print("0\n", .{});
+                std.debug.print("0 ", .{});
             }
-            std.debug.print("\n", .{});
-            std.debug.print("{}, {}\n", .{ x, y });
-            std.debug.print("{}\n", .{contains(visible, Pos.new(@bitCast(isize, x), @bitCast(isize, y)))});
-            std.debug.assert(expected[y][x] == 1 and contains(visible, Pos.new(@bitCast(isize, x), @bitCast(isize, y))));
+            //std.debug.assert(expected[y][x] == 1 and contains(visible, Pos.new(@bitCast(isize, x), @bitCast(isize, y))));
         }
         std.debug.print("\n", .{});
+    }
+
+    std.debug.print("\nexpected\n", .{});
+    y = 0;
+    while (y < expected.len) : (y += 1) {
+        var x: usize = 0;
+        while (x < expected[0].len) : (x += 1) {
+            if (expected[y][x] == 1) {
+                std.debug.print("1 ", .{});
+            } else {
+                std.debug.print("0 ", .{});
+            }
+            //std.debug.assert(expected[y][x] == 1 and contains(visible, Pos.new(@bitCast(isize, x), @bitCast(isize, y))));
+        }
+        std.debug.print("\n", .{});
+    }
+
+    y = 0;
+    while (y < expected.len) : (y += 1) {
+        var x: usize = 0;
+        while (x < expected[0].len) : (x += 1) {
+            std.debug.print("{} {} = {}, {}\n", .{ x, y, expected[y][x], contains(visible, Pos.new(@bitCast(isize, x), @bitCast(isize, y))) });
+            try std.testing.expectEqual(expected[y][x] == 1, contains(visible, Pos.new(@bitCast(isize, x), @bitCast(isize, y))));
+        }
     }
 }
 
@@ -506,78 +528,44 @@ test "expansive walls" {
 
     try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
     std.debug.print("\nnum visible {}, \n", .{state.visible.items.len});
-    var posIndex: usize = 0;
-    std.debug.print("\n", .{});
-    while (posIndex < state.visible.items.len) : (posIndex += 1) {
-        std.debug.print("{} {}, ", .{ state.visible.items[posIndex].x, state.visible.items[posIndex].y });
-    }
-    std.debug.print("\n", .{});
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 } };
-    matching_visible(expected[0..], state.visible);
+    try matching_visible(expected[0..], state.visible);
 }
 
-//
-//
-//#[test]
-//fn test_expanding_shadows() {
-//    let origin = (0, 0);
-//
-//    let tiles = vec!(vec!(0, 0, 0, 0, 0, 0, 0),
-//                     vec!(0, 1, 0, 0, 0, 0, 0),
-//                     vec!(0, 0, 0, 0, 0, 0, 0),
-//                     vec!(0, 0, 0, 0, 0, 0, 0),
-//                     vec!(0, 0, 0, 0, 0, 0, 0));
-//
-//    let mut is_blocking = |pos: Pos| {
-//        return !inside_map(pos, &tiles) || tiles[pos.1 as usize][pos.0 as usize] == 1;
-//    };
-//
-//    let mut visible = Vec::new();
-//    let mut mark_visible = |pos: Pos| {
-//        if inside_map(pos, &tiles) && !visible.contains(&pos) {
-//            visible.append(pos);
-//        }
-//    };
-//
-//    compute_fov(origin, &mut is_blocking, &mut mark_visible);
-//
-//    let expected = vec!(vec!(1, 1, 1, 1, 1, 1, 1),
-//                        vec!(1, 1, 1, 1, 1, 1, 1),
-//                        vec!(1, 1, 0, 0, 1, 1, 1),
-//                        vec!(1, 1, 0, 0, 0, 0, 1),
-//                        vec!(1, 1, 1, 0, 0, 0, 0));
-//    matching_visible(expected, visible);
-//}
-//
-//#[test]
-//fn test_no_blind_corners() {
-//    let origin = (3, 0);
-//
-//    let tiles = vec!(vec!(0, 0, 0, 0, 0, 0, 0),
-//                     vec!(1, 1, 1, 1, 0, 0, 0),
-//                     vec!(0, 0, 0, 1, 0, 0, 0),
-//                     vec!(0, 0, 0, 1, 0, 0, 0));
-//
-//    let mut is_blocking = |pos: Pos| {
-//        let outside = (pos.1 as usize) >= tiles.len() || (pos.0 as usize) >= tiles[0].len();
-//        return  outside || tiles[pos.1 as usize][pos.0 as usize] == 1;
-//    };
-//
-//    let mut visible = Vec::new();
-//    let mut mark_visible = |pos: Pos| {
-//        let outside = (pos.1 as usize) >= tiles.len() || (pos.0 as usize) >= tiles[0].len();
-//
-//        if !outside && !visible.contains(&pos) {
-//            visible.append(pos);
-//        }
-//    };
-//
-//    compute_fov(origin, &mut is_blocking, &mut mark_visible);
-//
-//    let expected = vec!(vec!(1, 1, 1, 1, 1, 1, 1),
-//                        vec!(1, 1, 1, 1, 1, 1, 1),
-//                        vec!(0, 0, 0, 0, 1, 1, 1),
-//                        vec!(0, 0, 0, 0, 0, 1, 1));
-//    matching_visible(expected, visible);
-//}
+test "test_expanding_shadows" {
+    const origin = Pos.new(0, 0);
+
+    const tiles = [_][]const isize{ &.{ 0, 0, 0, 0, 0, 0, 0 }, &.{ 0, 1, 0, 0, 0, 0, 0 }, &.{ 0, 0, 0, 0, 0, 0, 0 }, &.{ 0, 0, 0, 0, 0, 0, 0 }, &.{ 0, 0, 0, 0, 0, 0, 0 } };
+
+    var allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    var state = State.new(ArrayList(Pos).init(allocator.allocator()), tiles[0..]);
+
+    const ErrorSet = error{ Overflow, OutOfMemory };
+    var compute_fov = ComputeFov([]const []const isize, *State, ErrorSet).new(tiles[0..], &state);
+
+    try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
+    std.debug.print("\nnum visible {}, \n", .{state.visible.items.len});
+
+    const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 0, 0, 1, 1, 1 }, &.{ 1, 1, 0, 0, 0, 0, 1 }, &.{ 1, 1, 1, 0, 0, 0, 0 } };
+    try matching_visible(expected[0..], state.visible);
+}
+
+test "test_no_blind_corners" {
+    const origin = Pos.new(3, 0);
+
+    const tiles = [_][]const isize{ &.{ 0, 0, 0, 0, 0, 0, 0 }, &.{ 1, 1, 1, 1, 0, 0, 0 }, &.{ 0, 0, 0, 1, 0, 0, 0 }, &.{ 0, 0, 0, 1, 0, 0, 0 } };
+
+    var allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    var state = State.new(ArrayList(Pos).init(allocator.allocator()), tiles[0..]);
+
+    const ErrorSet = error{ Overflow, OutOfMemory };
+    var compute_fov = ComputeFov([]const []const isize, *State, ErrorSet).new(tiles[0..], &state);
+
+    try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
+    std.debug.print("\nnum visible {}, \n", .{state.visible.items.len});
+
+    const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 0, 0, 0, 0, 1, 1, 1 }, &.{ 0, 0, 0, 0, 0, 1, 1 } };
+
+    try matching_visible(expected[0..], state.visible);
+}
