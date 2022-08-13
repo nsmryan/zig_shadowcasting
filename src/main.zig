@@ -23,79 +23,63 @@ pub const Pos = struct {
 /// The mark_visible function pointer provides the ability to collect visible tiles. This
 /// may push them to a vector, or modify the map, etc.
 ///
-pub fn ComputeFov(comptime Map: type, comptime Result: type, comptime InErrorSet: type) type {
-    return struct {
-        const Self = @This();
-        const ErrorSet = InErrorSet || error{Overflow};
+pub fn compute_fov_fn(origin: Pos, map: anytype, visible: anytype, is_blocking: anytype, mark_visible: anytype) !void {
+    const errorSet = @typeInfo(@typeInfo(@TypeOf(mark_visible)).Fn.return_type.?).ErrorUnion.error_set;
+    try mark_visible(origin, map, visible);
 
-        map: Map,
-        result: Result,
+    var index: usize = 0;
+    while (index < 4) : (index += 1) {
+        const quadrant = Quadrant.new(Cardinal.from_index(index), origin);
 
-        pub const IsBlocking = fn (pos: Pos, map: Map) bool;
+        const first_row = Row.new(1, Rational.new(-1, 1), Rational.new(1, 1));
 
-        pub const MarkVisible = fn (pos: Pos, map: Map, result: Result) ErrorSet!void;
+        try scan(first_row, quadrant, map, visible, is_blocking, mark_visible, error{Overflow} || errorSet);
+    }
+}
 
-        pub fn new(map: Map, result: Result) Self {
-            return Self{ .map = map, .result = result };
+// Zig cannot infer the error set here.
+fn scan(input_row: Row, quadrant: Quadrant, map: anytype, visible: anytype, is_blocking: anytype, mark_visible: anytype, comptime Error: type) Error!void {
+    var prev_tile: ?Pos = null;
+
+    var row = input_row;
+
+    var iter: RowIter = row.tiles();
+    while (iter.next()) |tile| {
+        const tile_is_wall = is_blocking(quadrant.transform(tile), map);
+        const tile_is_floor = !tile_is_wall;
+
+        var prev_is_wall = false;
+        var prev_is_floor = false;
+        if (prev_tile) |prev| {
+            prev_is_wall = is_blocking(quadrant.transform(prev), map);
+            prev_is_floor = !prev_is_wall;
         }
 
-        pub fn compute_fov(self: *Self, origin: Pos, is_blocking: IsBlocking, mark_visible: MarkVisible) ErrorSet!void {
-            try mark_visible(origin, self.map, self.result);
+        if (tile_is_wall or try is_symmetric(row, tile)) {
+            const pos = quadrant.transform(tile);
 
-            var index: usize = 0;
-            while (index < 4) : (index += 1) {
-                const quadrant = Quadrant.new(Cardinal.from_index(index), origin);
-
-                const first_row = Row.new(1, Rational.new(-1, 1), Rational.new(1, 1));
-
-                try self.scan(first_row, quadrant, is_blocking, mark_visible);
-            }
+            try mark_visible(pos, map, visible);
         }
 
-        fn scan(self: *Self, input_row: Row, quadrant: Quadrant, is_blocking: IsBlocking, mark_visible: MarkVisible) ErrorSet!void {
-            var prev_tile: ?Pos = null;
-
-            var row = input_row;
-
-            var iter: RowIter = row.tiles();
-            while (iter.next()) |tile| {
-                const tile_is_wall = is_blocking(quadrant.transform(tile), self.map);
-                const tile_is_floor = !tile_is_wall;
-
-                var prev_is_wall = false;
-                var prev_is_floor = false;
-                if (prev_tile) |prev| {
-                    prev_is_wall = is_blocking(quadrant.transform(prev), self.map);
-                    prev_is_floor = !prev_is_wall;
-                }
-
-                if (tile_is_wall or try is_symmetric(row, tile)) {
-                    const pos = quadrant.transform(tile);
-
-                    try mark_visible(pos, self.map, self.result);
-                }
-
-                if (prev_is_wall and tile_is_floor) {
-                    row.start_slope = slope(tile);
-                }
-
-                if (prev_is_floor and tile_is_wall) {
-                    var next_row = row.next();
-                    next_row.end_slope = slope(tile);
-
-                    try self.scan(next_row, quadrant, is_blocking, mark_visible);
-                }
-
-                prev_tile = tile;
-            }
-
-            if (prev_tile) |tile| {
-                if (!is_blocking(quadrant.transform(tile), self.map)) {
-                    try self.scan(row.next(), quadrant, is_blocking, mark_visible);
-                }
-            }
+        if (prev_is_wall and tile_is_floor) {
+            row.start_slope = slope(tile);
         }
-    };
+
+        if (prev_is_floor and tile_is_wall) {
+            var next_row = row.next();
+            next_row.end_slope = slope(tile);
+
+            try scan(next_row, quadrant, map, visible, is_blocking, mark_visible, Error);
+        }
+
+        prev_tile = tile;
+    }
+
+    if (prev_tile) |tile| {
+        if (!is_blocking(quadrant.transform(tile), map)) {
+            try scan(row.next(), quadrant, map, visible, is_blocking, mark_visible, Error);
+        }
+    }
 }
 
 const Cardinal = enum {
@@ -365,10 +349,11 @@ test "expansive walls" {
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     var visible = ArrayList(Pos).init(allocator.allocator());
 
-    const ErrorSet = error{ Overflow, OutOfMemory };
-    var compute_fov = ComputeFov([]const []const isize, *ArrayList(Pos), ErrorSet).new(tiles[0..], &visible);
+    //const ErrorSet = error{ Overflow, OutOfMemory };
+    //var compute_fov = ComputeFov([]const []const isize, *ArrayList(Pos), ErrorSet).new(tiles[0..], &visible);
 
-    try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
+    //try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
+    try compute_fov_fn(origin, tiles[0..], &visible, is_blocking_fn, mark_visible_fn);
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 } };
     try matching_visible(expected[0..], &visible);
@@ -382,10 +367,7 @@ test "test_expanding_shadows" {
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     var visible = ArrayList(Pos).init(allocator.allocator());
 
-    const ErrorSet = error{ Overflow, OutOfMemory };
-    var compute_fov = ComputeFov([]const []const isize, *ArrayList(Pos), ErrorSet).new(tiles[0..], &visible);
-
-    try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
+    try compute_fov_fn(origin, tiles[0..], &visible, is_blocking_fn, mark_visible_fn);
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 0, 0, 1, 1, 1 }, &.{ 1, 1, 0, 0, 0, 0, 1 }, &.{ 1, 1, 1, 0, 0, 0, 0 } };
     try matching_visible(expected[0..], &visible);
@@ -399,10 +381,7 @@ test "test_no_blind_corners" {
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     var visible = ArrayList(Pos).init(allocator.allocator());
 
-    const ErrorSet = error{ Overflow, OutOfMemory };
-    var compute_fov = ComputeFov([]const []const isize, *ArrayList(Pos), ErrorSet).new(tiles[0..], &visible);
-
-    try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
+    try compute_fov_fn(origin, tiles[0..], &visible, is_blocking_fn, mark_visible_fn);
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 0, 0, 0, 0, 1, 1, 1 }, &.{ 0, 0, 0, 0, 0, 1, 1 } };
 
