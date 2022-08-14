@@ -23,6 +23,9 @@ const Error = error{Overflow} || Allocator.Error;
 /// blocked (such as by a wall), given the position and the 'map' argument.
 /// is_blocking: fn (Pos, @TypeOf(map)) bool;
 ///
+/// This type cannot be used in some cases, such as a slice constructed from an array, so it is an anytype
+/// instead.
+///
 pub fn compute_fov(origin: Pos, map: anytype, visible: *ArrayList(Pos), is_blocking: anytype) Error!void {
     // Mark the origin as visible.
     try mark_visible(origin, map, visible);
@@ -37,7 +40,6 @@ pub fn compute_fov(origin: Pos, map: anytype, visible: *ArrayList(Pos), is_block
     }
 }
 
-// Zig cannot infer the error set here, so we provide it manually.
 fn scan(input_row: Row, quadrant: Quadrant, map: anytype, visible: *ArrayList(Pos), is_blocking: anytype) Error!void {
     var prev_tile: ?Pos = null;
 
