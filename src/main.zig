@@ -44,11 +44,10 @@ pub fn compute_fov_fn(origin: Pos, map: anytype, visible: anytype, is_blocking: 
     debug.assert(is_blocking_args[1].arg_type.? == mark_visible_args[1].arg_type.?);
     debug.assert(mark_visible_args[0].arg_type.? == Pos);
     debug.assert(is_blocking_args[1].arg_type.? == mark_visible_args[1].arg_type.?);
-    std.debug.print("Map = '{}'\n", .{@TypeOf(map)});
-    //debug.assert(mark_visible_args[1].arg_type.? == @TypeOf(map));
     debug.assert(mark_visible_args[2].arg_type.? == @TypeOf(visible));
 
-    // TODO check return type for mark and blocking
+    debug.assert(is_blocking_info.Fn.return_type.? == bool);
+    debug.assert(@typeInfo(mark_visible_info.Fn.return_type.?) == .ErrorUnion);
 
     const errorSet = @typeInfo(return_type).ErrorUnion.error_set || error{Overflow};
 
