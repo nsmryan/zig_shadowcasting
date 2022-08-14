@@ -32,9 +32,8 @@ pub fn compute_fov_fn(origin: Pos, map: anytype, visible: anytype, is_blocking: 
 
     const mark_visible_info = @typeInfo(@TypeOf(mark_visible));
     debug.assert(mark_visible_info == .Fn);
-    if (mark_visible_info.Fn.return_type == null) {
-        @panic("mark_visible is expected to have a return type!");
-    }
+    debug.assert(mark_visible_info.Fn.return_type != null);
+
     const return_type = mark_visible_info.Fn.return_type.?;
     debug.assert(@typeInfo(return_type) == .ErrorUnion);
     const mark_visible_args = mark_visible_info.Fn.args;
