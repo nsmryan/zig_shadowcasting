@@ -15,52 +15,15 @@ pub const Pos = struct {
     }
 };
 
+const Error = error{Overflow} || Allocator.Error;
+
 /// Compute FOV information for a given position using the shadow mapping algorithm.
 ///
 /// This uses the is_blocking function pointer, which checks whether a given position is
 /// blocked (such as by a wall), given the position and the 'map' argument.
 /// is_blocking: fn (Pos, @TypeOf(map)) bool;
 ///
-/// The mark_visible function pointer provides the ability to collect visible tiles. This
-/// may push them to a vector, or modify the map, etc. It is provided the 'visible' argument
-/// which can be a pointer to a structure for the user to track visible positions.
-/// mark_visible: fn (Pos, @TypeOf(map), @TypeOf(visible)) !void;
-///
-/// The error union of mark_visible is merged with compute_fov, so the members of
-/// compute_fov's error set depends on the given mark_visible function.
-///
-pub fn compute_fov_fn(origin: Pos, map: anytype, visible: anytype, is_blocking: fn (Pos, @TypeOf(map)) bool, comptime ErrorSet: type, mark_visible: fn (Pos, @TypeOf(map), @TypeOf(visible)) ErrorSet!void) (error{Overflow} || ErrorSet)!void {
-    // is_blocking is a function with 2 arguments
-    const is_blocking_info = @typeInfo(@TypeOf(is_blocking));
-    debug.assert(is_blocking_info == .Fn);
-    const is_blocking_args = is_blocking_info.Fn.args;
-    debug.assert(is_blocking_args.len == 2);
-
-    // mark_visible is a function with a return
-    const mark_visible_info = @typeInfo(@TypeOf(mark_visible));
-    debug.assert(mark_visible_info == .Fn);
-    debug.assert(mark_visible_info.Fn.return_type != null);
-
-    // mark_visible returns an error union.
-    const return_type = mark_visible_info.Fn.return_type.?;
-    debug.assert(@typeInfo(return_type) == .ErrorUnion);
-    // mark_visible takes three arguments
-    const mark_visible_args = mark_visible_info.Fn.args;
-    debug.assert(mark_visible_args.len == 3);
-
-    // Check arguments of given function pointers.
-    debug.assert(is_blocking_args[0].arg_type.? == Pos);
-    debug.assert(is_blocking_args[1].arg_type.? == mark_visible_args[1].arg_type.?);
-    debug.assert(mark_visible_args[0].arg_type.? == Pos);
-    debug.assert(is_blocking_args[1].arg_type.? == mark_visible_args[1].arg_type.?);
-    debug.assert(mark_visible_args[2].arg_type.? == @TypeOf(visible));
-
-    // is_blocking returns a bool.
-    debug.assert(is_blocking_info.Fn.return_type.? == bool);
-
-    // Build the error return type, combining errors from our functions and the user's mark_visible function.
-    const errorSet = @typeInfo(return_type).ErrorUnion.error_set || error{Overflow};
-
+pub fn compute_fov(origin: Pos, map: anytype, visible: *ArrayList(Pos), is_blocking: anytype) Error!void {
     // Mark the origin as visible.
     try mark_visible(origin, map, visible);
 
@@ -70,12 +33,12 @@ pub fn compute_fov_fn(origin: Pos, map: anytype, visible: anytype, is_blocking: 
 
         const first_row = Row.new(1, Rational.new(-1, 1), Rational.new(1, 1));
 
-        try scan(first_row, quadrant, map, visible, is_blocking, mark_visible, errorSet);
+        try scan(first_row, quadrant, map, visible, is_blocking);
     }
 }
 
 // Zig cannot infer the error set here, so we provide it manually.
-fn scan(input_row: Row, quadrant: Quadrant, map: anytype, visible: anytype, is_blocking: anytype, mark_visible: anytype, comptime Error: type) Error!void {
+fn scan(input_row: Row, quadrant: Quadrant, map: anytype, visible: *ArrayList(Pos), is_blocking: anytype) Error!void {
     var prev_tile: ?Pos = null;
 
     var row = input_row;
@@ -106,7 +69,7 @@ fn scan(input_row: Row, quadrant: Quadrant, map: anytype, visible: anytype, is_b
             var next_row = row.next();
             next_row.end_slope = slope(tile);
 
-            try scan(next_row, quadrant, map, visible, is_blocking, mark_visible, Error);
+            try scan(next_row, quadrant, map, visible, is_blocking);
         }
 
         prev_tile = tile;
@@ -114,7 +77,7 @@ fn scan(input_row: Row, quadrant: Quadrant, map: anytype, visible: anytype, is_b
 
     if (prev_tile) |tile| {
         if (!is_blocking(quadrant.transform(tile), map)) {
-            try scan(row.next(), quadrant, map, visible, is_blocking, mark_visible, Error);
+            try scan(row.next(), quadrant, map, visible, is_blocking);
         }
     }
 }
@@ -374,7 +337,7 @@ fn contains(visible: *ArrayList(Pos), pos: Pos) bool {
     return false;
 }
 
-fn mark_visible_fn(pos: Pos, tiles: []const []const isize, visible: *ArrayList(Pos)) !void {
+fn mark_visible(pos: Pos, tiles: []const []const isize, visible: *ArrayList(Pos)) !void {
     if (inside_map(pos, tiles) and !contains(visible, pos)) {
         try visible.append(pos);
     }
@@ -388,7 +351,7 @@ test "expansive walls" {
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     var visible = ArrayList(Pos).init(allocator.allocator());
 
-    try compute_fov_fn(origin, tiles[0..], &visible, is_blocking_fn, Allocator.Error, mark_visible_fn);
+    try compute_fov(origin, tiles[0..], &visible, is_blocking_fn);
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 } };
     try matching_visible(expected[0..], &visible);
@@ -402,7 +365,7 @@ test "test_expanding_shadows" {
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     var visible = ArrayList(Pos).init(allocator.allocator());
 
-    try compute_fov_fn(origin, tiles[0..], &visible, is_blocking_fn, Allocator.Error, mark_visible_fn);
+    try compute_fov(origin, tiles[0..], &visible, is_blocking_fn);
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 0, 0, 1, 1, 1 }, &.{ 1, 1, 0, 0, 0, 0, 1 }, &.{ 1, 1, 1, 0, 0, 0, 0 } };
     try matching_visible(expected[0..], &visible);
@@ -416,7 +379,7 @@ test "test_no_blind_corners" {
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     var visible = ArrayList(Pos).init(allocator.allocator());
 
-    try compute_fov_fn(origin, tiles[0..], &visible, is_blocking_fn, Allocator.Error, mark_visible_fn);
+    try compute_fov(origin, tiles[0..], &visible, is_blocking_fn);
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 0, 0, 0, 0, 1, 1, 1 }, &.{ 0, 0, 0, 0, 0, 1, 1 } };
 
