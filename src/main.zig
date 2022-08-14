@@ -1,5 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
+const debug = std.debug;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
@@ -24,7 +25,33 @@ pub const Pos = struct {
 /// may push them to a vector, or modify the map, etc.
 ///
 pub fn compute_fov_fn(origin: Pos, map: anytype, visible: anytype, is_blocking: anytype, mark_visible: anytype) !void {
-    const errorSet = @typeInfo(@typeInfo(@TypeOf(mark_visible)).Fn.return_type.?).ErrorUnion.error_set;
+    const is_blocking_info = @typeInfo(@TypeOf(is_blocking));
+    debug.assert(is_blocking_info == .Fn);
+    const is_blocking_args = is_blocking_info.Fn.args;
+    debug.assert(is_blocking_args.len == 2);
+
+    const mark_visible_info = @typeInfo(@TypeOf(mark_visible));
+    debug.assert(mark_visible_info == .Fn);
+    if (mark_visible_info.Fn.return_type == null) {
+        @panic("mark_visible is expected to have a return type!");
+    }
+    const return_type = mark_visible_info.Fn.return_type.?;
+    debug.assert(@typeInfo(return_type) == .ErrorUnion);
+    const mark_visible_args = mark_visible_info.Fn.args;
+    debug.assert(mark_visible_args.len == 3);
+
+    debug.assert(is_blocking_args[0].arg_type.? == Pos);
+    debug.assert(is_blocking_args[1].arg_type.? == mark_visible_args[1].arg_type.?);
+    debug.assert(mark_visible_args[0].arg_type.? == Pos);
+    debug.assert(is_blocking_args[1].arg_type.? == mark_visible_args[1].arg_type.?);
+    std.debug.print("Map = '{}'\n", .{@TypeOf(map)});
+    //debug.assert(mark_visible_args[1].arg_type.? == @TypeOf(map));
+    debug.assert(mark_visible_args[2].arg_type.? == @TypeOf(visible));
+
+    // TODO check return type for mark and blocking
+
+    const errorSet = @typeInfo(return_type).ErrorUnion.error_set || error{Overflow};
+
     try mark_visible(origin, map, visible);
 
     var index: usize = 0;
@@ -33,7 +60,7 @@ pub fn compute_fov_fn(origin: Pos, map: anytype, visible: anytype, is_blocking: 
 
         const first_row = Row.new(1, Rational.new(-1, 1), Rational.new(1, 1));
 
-        try scan(first_row, quadrant, map, visible, is_blocking, mark_visible, error{Overflow} || errorSet);
+        try scan(first_row, quadrant, map, visible, is_blocking, mark_visible, errorSet);
     }
 }
 
