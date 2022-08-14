@@ -18,38 +18,50 @@ pub const Pos = struct {
 /// Compute FOV information for a given position using the shadow mapping algorithm.
 ///
 /// This uses the is_blocking function pointer, which checks whether a given position is
-/// blocked (such as by a wall), and is expected to capture some kind of grid
-/// or map from the user.
+/// blocked (such as by a wall), given the position and the 'map' argument.
+/// is_blocking: fn (Pos, @TypeOf(map)) bool;
 ///
 /// The mark_visible function pointer provides the ability to collect visible tiles. This
-/// may push them to a vector, or modify the map, etc.
+/// may push them to a vector, or modify the map, etc. It is provided the 'visible' argument
+/// which can be a pointer to a structure for the user to track visible positions.
+/// mark_visible: fn (Pos, @TypeOf(map), @TypeOf(visible)) !void;
 ///
-pub fn compute_fov_fn(origin: Pos, map: anytype, visible: anytype, is_blocking: anytype, mark_visible: anytype) !void {
+/// The error union of mark_visible is merged with compute_fov, so the members of
+/// compute_fov's error set depends on the given mark_visible function.
+///
+pub fn compute_fov_fn(origin: Pos, map: anytype, visible: anytype, is_blocking: fn (Pos, @TypeOf(map)) bool, comptime ErrorSet: type, mark_visible: fn (Pos, @TypeOf(map), @TypeOf(visible)) ErrorSet!void) (error{Overflow} || ErrorSet)!void {
+    // is_blocking is a function with 2 arguments
     const is_blocking_info = @typeInfo(@TypeOf(is_blocking));
     debug.assert(is_blocking_info == .Fn);
     const is_blocking_args = is_blocking_info.Fn.args;
     debug.assert(is_blocking_args.len == 2);
 
+    // mark_visible is a function with a return
     const mark_visible_info = @typeInfo(@TypeOf(mark_visible));
     debug.assert(mark_visible_info == .Fn);
     debug.assert(mark_visible_info.Fn.return_type != null);
 
+    // mark_visible returns an error union.
     const return_type = mark_visible_info.Fn.return_type.?;
     debug.assert(@typeInfo(return_type) == .ErrorUnion);
+    // mark_visible takes three arguments
     const mark_visible_args = mark_visible_info.Fn.args;
     debug.assert(mark_visible_args.len == 3);
 
+    // Check arguments of given function pointers.
     debug.assert(is_blocking_args[0].arg_type.? == Pos);
     debug.assert(is_blocking_args[1].arg_type.? == mark_visible_args[1].arg_type.?);
     debug.assert(mark_visible_args[0].arg_type.? == Pos);
     debug.assert(is_blocking_args[1].arg_type.? == mark_visible_args[1].arg_type.?);
     debug.assert(mark_visible_args[2].arg_type.? == @TypeOf(visible));
 
+    // is_blocking returns a bool.
     debug.assert(is_blocking_info.Fn.return_type.? == bool);
-    debug.assert(@typeInfo(mark_visible_info.Fn.return_type.?) == .ErrorUnion);
 
+    // Build the error return type, combining errors from our functions and the user's mark_visible function.
     const errorSet = @typeInfo(return_type).ErrorUnion.error_set || error{Overflow};
 
+    // Mark the origin as visible.
     try mark_visible(origin, map, visible);
 
     var index: usize = 0;
@@ -62,7 +74,7 @@ pub fn compute_fov_fn(origin: Pos, map: anytype, visible: anytype, is_blocking: 
     }
 }
 
-// Zig cannot infer the error set here.
+// Zig cannot infer the error set here, so we provide it manually.
 fn scan(input_row: Row, quadrant: Quadrant, map: anytype, visible: anytype, is_blocking: anytype, mark_visible: anytype, comptime Error: type) Error!void {
     var prev_tile: ?Pos = null;
 
@@ -227,6 +239,8 @@ fn round_ties_down(n: Rational) isize {
     return (n.sub(Rational.new(1, 2))).ceil();
 }
 
+// This is just enough of a Rational type for this library. Zig std lib has a Rational type,
+// but it is a BigRational which requires an allocator.
 const Rational = struct {
     const Error = error{Overflow};
     num: isize,
@@ -374,11 +388,7 @@ test "expansive walls" {
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     var visible = ArrayList(Pos).init(allocator.allocator());
 
-    //const ErrorSet = error{ Overflow, OutOfMemory };
-    //var compute_fov = ComputeFov([]const []const isize, *ArrayList(Pos), ErrorSet).new(tiles[0..], &visible);
-
-    //try compute_fov.compute_fov(origin, is_blocking_fn, mark_visible_fn);
-    try compute_fov_fn(origin, tiles[0..], &visible, is_blocking_fn, mark_visible_fn);
+    try compute_fov_fn(origin, tiles[0..], &visible, is_blocking_fn, Allocator.Error, mark_visible_fn);
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 } };
     try matching_visible(expected[0..], &visible);
@@ -392,7 +402,7 @@ test "test_expanding_shadows" {
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     var visible = ArrayList(Pos).init(allocator.allocator());
 
-    try compute_fov_fn(origin, tiles[0..], &visible, is_blocking_fn, mark_visible_fn);
+    try compute_fov_fn(origin, tiles[0..], &visible, is_blocking_fn, Allocator.Error, mark_visible_fn);
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 0, 0, 1, 1, 1 }, &.{ 1, 1, 0, 0, 0, 0, 1 }, &.{ 1, 1, 1, 0, 0, 0, 0 } };
     try matching_visible(expected[0..], &visible);
@@ -406,7 +416,7 @@ test "test_no_blind_corners" {
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     var visible = ArrayList(Pos).init(allocator.allocator());
 
-    try compute_fov_fn(origin, tiles[0..], &visible, is_blocking_fn, mark_visible_fn);
+    try compute_fov_fn(origin, tiles[0..], &visible, is_blocking_fn, Allocator.Error, mark_visible_fn);
 
     const expected = [_][]const isize{ &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 1, 1, 1, 1, 1, 1, 1 }, &.{ 0, 0, 0, 0, 1, 1, 1 }, &.{ 0, 0, 0, 0, 0, 1, 1 } };
 
