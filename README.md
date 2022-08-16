@@ -48,6 +48,7 @@ is always an ArrayList(Pos), unlike the Rust and Python where these are generic.
         // Create the arraylist to store visible tiles.
         var allocator = std.heap.GeneralPurposeAllocator(.{}){};
         var visible = ArrayList(Pos).init(allocator.allocator());
+        visible.deinit();
 
         // Compute FoV using the symmetric shadow casting algorithm.
         try compute_fov(origin, tiles[0..], &visible, is_blocking_fn);
