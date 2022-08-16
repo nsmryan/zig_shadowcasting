@@ -352,6 +352,7 @@ test "expansive walls" {
 
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     var visible = ArrayList(Pos).init(allocator.allocator());
+    defer visible.deinit();
 
     try compute_fov(origin, tiles[0..], &visible, is_blocking_fn);
 
@@ -366,6 +367,7 @@ test "test_expanding_shadows" {
 
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     var visible = ArrayList(Pos).init(allocator.allocator());
+    defer visible.deinit();
 
     try compute_fov(origin, tiles[0..], &visible, is_blocking_fn);
 
@@ -380,6 +382,7 @@ test "test_no_blind_corners" {
 
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     var visible = ArrayList(Pos).init(allocator.allocator());
+    defer visible.deinit();
 
     try compute_fov(origin, tiles[0..], &visible, is_blocking_fn);
 
